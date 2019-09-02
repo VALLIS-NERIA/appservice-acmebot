@@ -15,7 +15,7 @@ namespace AppService.Acmebot
 
         Task<IList<Site>> GetSites(object input = null);
 
-        Task<IList<Certificate>> GetExpringCertificates(DateTime currentDateTime);
+        Task<IList<Certificate>> GetExpringCertificates(DateTime currentDateTime, int days);
 
         Task<IList<Certificate>> GetAllCertificates(object input = null);
 

@@ -55,6 +55,14 @@ namespace AppService.Acmebot
             return await _webSiteManagementClient.WebApps.GetAsync(resourceGroupName, siteName);
         }
 
+        [FunctionName(nameof(GetDnsZones))]
+        public async Task<IList<Zone>> GetDnsZones([ActivityTrigger] object input)
+        {
+            var zones = (await this._dnsManagementClient.Zones.ListAsync()).ToList();
+
+            return zones;
+        }
+
         [FunctionName(nameof(GetSites))]
         public async Task<IList<Site>> GetSites([ActivityTrigger] object input)
         {
@@ -73,14 +81,14 @@ namespace AppService.Acmebot
             return list.Where(x => x.HostNameSslStates.Any(xs => !xs.Name.EndsWith(".azurewebsites.net") && !xs.Name.EndsWith(".trafficmanager.net"))).ToArray();
         }
 
-        [FunctionName(nameof(GetCertificates))]
-        public async Task<IList<Certificate>> GetCertificates([ActivityTrigger] DateTime currentDateTime)
+        [FunctionName(nameof(GetExpringCertificates))]
+        public async Task<IList<Certificate>> GetExpringCertificates([ActivityTrigger] DateTime currentDateTime, int days = 30)
         {
             var certificates = await _webSiteManagementClient.Certificates.ListAsync();
 
             return certificates
                    .Where(x => x.Issuer == "Let's Encrypt Authority X3" || x.Issuer == "Let's Encrypt Authority X4" || x.Issuer == "Fake LE Intermediate X1")
-                   .Where(x => (x.ExpirationDate.Value - currentDateTime).TotalDays < 30).ToArray();
+                   .Where(x => (x.ExpirationDate.Value - currentDateTime).TotalDays < days).ToArray();
         }
 
         [FunctionName(nameof(GetAllCertificates))]
@@ -180,6 +188,11 @@ namespace AppService.Acmebot
             }
         }
 
+        /// <summary>
+        /// Make sure that all hostnames in <paramref name="hostNames"/> exist in Azure DNS./>
+        /// </summary>
+        /// <param name="hostNames">The hostnames to validate.</param>
+        /// <returns>The asynchronous task.</returns>
         [FunctionName(nameof(Dns01Precondition))]
         public async Task Dns01Precondition([ActivityTrigger] IList<string> hostNames)
         {

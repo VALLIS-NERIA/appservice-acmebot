@@ -17,7 +17,7 @@ namespace AppService.Acmebot
             var proxy = context.CreateActivityProxy<ISharedFunctions>();
 
             // 期限切れまで 30 日以内の証明書を取得する
-            var certificates = await proxy.GetExpringCertificates(context.CurrentUtcDateTime);
+            var certificates = await proxy.GetExpiringCertificates(context.CurrentUtcDateTime);
 
             foreach (var certificate in certificates)
             {

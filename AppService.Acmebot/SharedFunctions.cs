@@ -55,14 +55,6 @@ namespace AppService.Acmebot
             return await _webSiteManagementClient.WebApps.GetAsync(resourceGroupName, siteName);
         }
 
-        [FunctionName(nameof(GetDnsZones))]
-        public async Task<IList<Zone>> GetDnsZones([ActivityTrigger] object input)
-        {
-            var zones = (await this._dnsManagementClient.Zones.ListAsync()).ToList();
-
-            return zones;
-        }
-
         [FunctionName(nameof(GetSites))]
         public async Task<IList<Site>> GetSites([ActivityTrigger] object input)
         {
@@ -81,8 +73,8 @@ namespace AppService.Acmebot
             return list.Where(x => x.HostNameSslStates.Any(xs => !xs.Name.EndsWith(".azurewebsites.net") && !xs.Name.EndsWith(".trafficmanager.net"))).ToArray();
         }
 
-        [FunctionName(nameof(GetExpringCertificates))]
-        public async Task<IList<Certificate>> GetExpringCertificates([ActivityTrigger] DateTime currentDateTime)
+        [FunctionName(nameof(GetExpiringCertificates))]
+        public async Task<IList<Certificate>> GetExpiringCertificates([ActivityTrigger] DateTime currentDateTime)
         {
             var certificates = await _webSiteManagementClient.Certificates.ListAsync();
             int days;
@@ -193,11 +185,6 @@ namespace AppService.Acmebot
             }
         }
 
-        /// <summary>
-        /// Make sure that all hostnames in <paramref name="hostNames"/> exist in Azure DNS./>
-        /// </summary>
-        /// <param name="hostNames">The hostnames to validate.</param>
-        /// <returns>The asynchronous task.</returns>
         [FunctionName(nameof(Dns01Precondition))]
         public async Task Dns01Precondition([ActivityTrigger] IList<string> hostNames)
         {

@@ -142,6 +142,75 @@ namespace AppService.Acmebot
 
             return await starter.WaitForCompletionOrCreateCheckStatusResponseAsync(req, instanceId, TimeSpan.FromMinutes(5));
         }
+
+        [FunctionName(nameof(CreateWildcardCertificate))]
+        public async Task CreateWildcardCertificate([OrchestrationTrigger] DurableOrchestrationContext context, ILogger log)
+        {
+            var request = context.GetInput<DnsZoneRequest>();
+
+            var proxy = context.CreateActivityProxy<ISharedFunctions>();
+
+
+            foreach (string hostName in request.HostNames)
+            {
+                var zone = await proxy.GetZone(hostName);
+                var requestingDomains = new[] { "*." + hostName, hostName };
+                var orderDetails = await proxy.Order(requestingDomains);
+                var challenges = new List<ChallengeResult>();
+
+                foreach (var authorization in orderDetails.Payload.Authorizations)
+                {
+                    ChallengeResult result;
+
+                        // DNS-01 を使う
+                        result = await proxy.Dns01Authorization((authorization, context.ParentInstanceId ?? context.InstanceId));
+
+                        // Azure DNS で正しくレコードが引けるか確認
+                        await proxy.CheckDnsChallenge(result);
+                    
+
+                    challenges.Add(result);
+                }
+
+                // ACME Answer を実行
+                await proxy.AnswerChallenges(challenges);
+
+                // Order のステータスが ready になるまで 60 秒待機
+                await proxy.CheckIsReady(orderDetails);
+
+                // Order の最終処理を実行し PFX を作成
+                var (thumbprint, pfxBlob) = await proxy.FinalizeOrder((requestingDomains, orderDetails));
+
+                await proxy.UploadCertificate((request.ResourceGroup, request.Location, $"{requestingDomains[0]}-{thumbprint}", pfxBlob));
+            }
+        }
+
+        [FunctionName(nameof(CreateWildcardCertificate_HttpStart))]
+        public async Task<HttpResponseMessage> CreateWildcardCertificate_HttpStart(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "create-wildcard-certificate")]
+            HttpRequestMessage req,
+            [OrchestrationClient] DurableOrchestrationClient starter,
+            ILogger log)
+        {
+            if (!req.Headers.Contains("X-MS-CLIENT-PRINCIPAL-ID"))
+            {
+                return req.CreateErrorResponse(HttpStatusCode.Unauthorized, $"Need to activate EasyAuth.");
+            }
+
+            var request = await req.Content.ReadAsAsync<DnsZoneRequest>();
+
+            if (request.HostNames.Length == 0)
+            {
+                return req.CreateErrorResponse(HttpStatusCode.BadRequest, $"{nameof(request)} is empty.");
+            }
+
+            // Function input comes from the request content.
+            var instanceId = await starter.StartNewAsync("AddCertificate", request);
+
+            log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
+
+            return await starter.WaitForCompletionOrCreateCheckStatusResponseAsync(req, instanceId, TimeSpan.FromMinutes(5));
+        }
     }
 
     public class AddCertificateRequest
@@ -151,5 +220,12 @@ namespace AppService.Acmebot
         public string SlotName { get; set; }
         public string[] Domains { get; set; }
         public bool? UseIpBasedSsl { get; set; }
+    }
+
+    public class DnsZoneRequest
+    {
+        public string[] HostNames { get; set; }
+        public string ResourceGroup { get; set; }
+        public string Location { get; set; }
     }
 }

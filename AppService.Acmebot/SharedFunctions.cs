@@ -73,6 +73,26 @@ namespace AppService.Acmebot
             return list.Where(x => x.HostNameSslStates.Any(xs => !xs.Name.EndsWith(".azurewebsites.net") && !xs.Name.EndsWith(".trafficmanager.net"))).ToArray();
         }
 
+        [FunctionName(nameof(GetZone))]
+        public async Task<Zone> GetZone([ActivityTrigger] string dnsZoneName)
+        {
+            foreach (var zone in await _dnsManagementClient.Zones.ListAsync())
+            {
+                if (string.Equals(zone.Name, dnsZoneName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return zone;
+                }
+            }
+
+            throw new ArgumentException($"Cannot find DNS Zone {dnsZoneName}. Please check the name and IAM.");
+        }
+
+        [FunctionName(nameof(GetZones))]
+        public async Task<IList<Zone>> GetZones([ActivityTrigger] object input)
+        {
+            return (await _dnsManagementClient.Zones.ListAsync()).ToArray();
+        }
+
         [FunctionName(nameof(GetCertificates))]
         public async Task<IList<Certificate>> GetCertificates([ActivityTrigger] DateTime currentDateTime)
         {
@@ -368,6 +388,22 @@ namespace AppService.Acmebot
                 PfxBlob = pfxBlob,
                 ServerFarmId = site.ServerFarmId
             });
+        }
+
+        [FunctionName(nameof(UploadCertificate))]
+        public Task UploadCertificate([ActivityTrigger] (string, string, string, byte[]) input)
+        {
+            var (resourceGroup, location, certificateName, pfxBlob) = input;
+
+            return _webSiteManagementClient.Certificates.CreateOrUpdateAsync(
+                resourceGroup,
+                certificateName,
+                new Certificate
+                {
+                    Password = "P@ssw0rd",
+                    PfxBlob = pfxBlob,
+                    Location = location
+                });
         }
 
         [FunctionName(nameof(UpdateSiteBinding))]

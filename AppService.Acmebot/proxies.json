@@ -2,10 +2,16 @@
   "$schema": "http://json.schemastore.org/proxies",
   "proxies": {
     "AddCertificate": {
-      "matchCondition": {
-        "route": "add-certificate"
-      },
-      "backendUri": "https://shibayan.blob.core.windows.net/azure-appservice-letsencrypt/index.v2.html"
-    }
+        "matchCondition": {
+            "route": "add-certificate"
+        },
+        "backendUri": "https://shibayan.blob.core.windows.net/azure-appservice-letsencrypt/index.v2.html"
+    },
+    "CreateWildcard": {
+        "matchCondition": {
+            "route": "create-wildcard"
+        },
+        "backendUri": "https://kvantumasg.blob.core.windows.net/static/create-wildcard.html"
+    } 
   }
 }

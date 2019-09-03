@@ -1,0 +1,139 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>App Service Acmebot</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.2/css/bulma.min.css">
+  <script defer src="https://use.fontawesome.com/releases/v5.3.1/js/all.js"></script>
+</head>
+<body>
+  <section class="section">
+    <div class="container">
+      <h1 class="title">
+        Add Certificate
+      </h1>
+      <div id="app">
+        <div class="field">
+          <label class="label">Domain Name</label>
+          <div class="control">
+            <div class="select is-multiple">
+              <select multiple v-model="selectedDomains">
+                <option v-for="domainName in domains" :value="domainName">{{ domainName }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+            <label class="label">Resource group to place the certificate</label>
+            <div class="control">
+              <div class="select" v-bind:class="{ 'is-loading': loading }">
+                <select v-model="resourceGroupName">
+                  <option disabled value="">Please select one</option>
+                  <option v-for="resourceGroup in list" :value="resourceGroup.name">{{ resourceGroup.name }}</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        <div class="field">
+          <label class="label">Location</label>
+          <div class="control">
+            <div class="input">
+              <input v-model="location">
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <div class="control">
+            <button class="button is-primary" v-on:click="submit" v-bind:class="{ 'is-loading': sending }">Submit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/2.5.17/vue.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.18.0/axios.min.js"></script>
+  <script>
+    var app = new Vue({
+      el: '#app',
+      data: {
+        list: [],
+        domains: [],
+        resourceGroupName: '',
+        selectedDomains: [],
+        location: '',
+        loading: -2,
+        sending: false
+      },
+      computed: {
+        selectedResourceGroup: function () {
+          var name = this.resourceGroupName;
+          return this.list.find(function (x) { return x.name === name; });
+        }
+      },
+      methods: {
+        load: function () {
+          var self = this;
+          self.loading = -2;
+          axios.get("/api/get-sites-information")
+            .then(function (response) {
+              self.$set(self, "list", response.data);
+            })
+            .catch(function (error) {
+              alert(error);
+            })
+            .then(function () {
+              self.loading += 1;
+            });
+          axios.get("/api/get-zones-information")
+            .then(function (response) {
+              self.$set(self, "domains", response.data);
+            })
+            .catch(function (error) {
+              alert(error);
+            })
+            .then(function () {
+              self.loading += 1;
+            });
+        },
+        reload: function () {
+          this.list = [];
+          this.domains = [];
+          this.resourceGroupName = '';
+          this.selectedDomains = [];
+          //this.location = '';
+
+          this.load();
+        },
+        submit: function () {
+          var postData = {
+            Domains: this.selectedDomains,
+            ResourceGroupName: this.resourceGroupName,
+            Location: this.location
+          };
+
+          var self = this;
+
+          self.sending = true;
+
+          axios.post("/api/create-wildcard-certificate", postData)
+            .then(function (response) {
+              alert("The certificate was successfully issued");
+
+              self.reload();
+            })
+            .catch(function (error) {
+              alert(error);
+            })
+            .then(function () {
+              self.sending = false;
+            });
+        }
+      },
+      beforeMount: function () {
+        this.load();
+      }
+    });
+  </script>
+</body>
+</html>

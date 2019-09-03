@@ -4,20 +4,28 @@ using System.Threading.Tasks;
 
 using ACMESharp.Protocol;
 
+using Microsoft.Azure.Management.Dns.Models;
 using Microsoft.Azure.Management.WebSites.Models;
 using Microsoft.Azure.WebJobs;
 
 namespace AppService.Acmebot
 {
+
     public interface ISharedFunctions
     {
         Task<Site> GetSite((string, string, string) input);
 
         Task<IList<Site>> GetSites(object input = null);
 
+        Task<Zone> GetZone(string dnsZoneName);
+
+        Task<IList<Zone>> GetZones(object input = null);
+
         Task<IList<Certificate>> GetCertificates(DateTime currentDateTime);
 
         Task<IList<Certificate>> GetAllCertificates(object input = null);
+
+        Task<DeploymentLocations> GetAllLocations(object input = null);
 
         Task<OrderDetails> Order(IList<string> hostNames);
 
@@ -43,6 +51,8 @@ namespace AppService.Acmebot
         Task<(string, byte[])> FinalizeOrder((IList<string>, OrderDetails) input);
 
         Task UpdateCertificate((Site, string, byte[]) input);
+
+        Task UploadCertificate((string, string, string, byte[]) input);
 
         Task UpdateSiteBinding(Site site);
 

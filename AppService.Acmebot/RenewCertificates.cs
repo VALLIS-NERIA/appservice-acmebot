@@ -1,10 +1,12 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
 using System.Threading.Tasks;
 using Microsoft.Azure.Management.WebSites.Models;
 using Microsoft.Azure.WebJobs;
+using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.Extensions.Logging;
-
 namespace AppService.Acmebot
 {
     public class RenewCertificates
@@ -35,94 +37,99 @@ namespace AppService.Acmebot
 
             var tasks = new List<Task>();
 
-            foreach (var certificate in certificates)
+            // update wildcard certs
+            foreach (var certificate in certificates.Where(cert => cert.HostNames.Any(hn => hn.StartsWith("*"))))
             {
-                var relatedSites = sites.Where(site => site.HostNameSslStates.Any(sslState => sslState.Thumbprint == certificate.Thumbprint)).ToArray();
-                if (relatedSites.Length == 0)
+                tasks.Add(context.CallSubOrchestratorAsync(nameof(RenewWildcardCertificateForAllSites), (certificate, sites)));
+            }
+
+            // wildcard certs are excluded
+            // サイト単位で証明書の更新を行う
+            foreach (var site in sites)
+            {
+                // 期限切れが近い証明書がバインドされているか確認
+                var boundCertificates = certificates.Where(x => !x.HostNames.Any(hn => hn.StartsWith("*")) && site.HostNameSslStates.Any(xs => xs.Thumbprint == x.Thumbprint))
+                                                    .ToArray();
+
+                // 対象となる証明書が存在しない場合はスキップ
+                if (boundCertificates.Length == 0)
                 {
                     continue;
                 }
 
                 // 証明書の更新処理を開始
-                tasks.Add(context.CallSubOrchestratorAsync(nameof(RenewCertificateRelatedSites), (certificate, relatedSites)));
+                tasks.Add(context.CallSubOrchestratorAsync(nameof(RenewSiteCertificates), (site, boundCertificates)));
             }
 
             // サブオーケストレーターの完了を待つ
             await Task.WhenAll(tasks);
         }
 
-        [FunctionName(nameof(RenewCertificateRelatedSites))]
-        public async Task RenewCertificateRelatedSites([OrchestrationTrigger] DurableOrchestrationContext context, ILogger log)
+        [FunctionName(nameof(RenewWildcardCertificateForAllSites))]
+        public async Task RenewWildcardCertificateForAllSites([OrchestrationTrigger] DurableOrchestrationContext context, ILogger log)
         {
             var (certificate, sites) = context.GetInput<(Certificate, Site[])>();
+            if (!certificate.HostNames.Any(x => x.StartsWith("*")))
+            {
+                throw new ArgumentException("certificate must be issued to a wildcard!");
+            }
 
             var proxy = context.CreateActivityProxy<ISharedFunctions>();
 
             log.LogInformation($"Cert hostname(s): {string.Join(',', certificate.HostNames)}");
+            log.LogInformation($"Cert thumbprint: {certificate.Thumbprint}");
+
+            log.LogInformation($"Subject name: {certificate.SubjectName}");
+
+            // 前提条件をチェック
+            await proxy.Dns01Precondition(certificate.HostNames);
+
+            // 新しく ACME Order を作成する
+            var orderDetails = await proxy.Order(certificate.HostNames);
+
+            // 複数の Authorizations を処理する
+            var challenges = new List<ChallengeResult>();
+
+            foreach (var authorization in orderDetails.Payload.Authorizations)
+            {
+                ChallengeResult result;
+
+                // ACME Challenge を実行
+                result = await proxy.Dns01Authorization((authorization, context.ParentInstanceId ?? context.InstanceId));
+
+                // Azure DNS で正しくレコードが引けるか確認
+                await proxy.CheckDnsChallenge(result);
+
+                challenges.Add(result);
+            }
+
+            // ACME Answer を実行
+            await proxy.AnswerChallenges(challenges);
+
+            // Order のステータスが ready になるまで 60 秒待機
+            await proxy.CheckIsReady(orderDetails);
+
+            // Order の最終処理を実行し PFX を作成
+            var (thumbprint, pfxBlob) = await proxy.FinalizeOrder((certificate.HostNames, orderDetails));
 
             var tasks = new List<Task>();
 
             foreach (var site in sites)
             {
-                log.LogInformation($"Subject name: {certificate.SubjectName}");
-
-                // ワイルドカード、コンテナ、Linux の場合は DNS-01 を利用する
-                var useDns01Auth = certificate.HostNames.Any(x => x.StartsWith("*")) || site.Kind.Contains("container") || site.Kind.Contains("linux");
-
-                // 前提条件をチェック
-                if (useDns01Auth)
+                if (!site.HostNameSslStates.Any(x => string.Equals(x.Thumbprint, certificate.Thumbprint, StringComparison.OrdinalIgnoreCase)))
                 {
-                    await proxy.Dns01Precondition(certificate.HostNames);
-                }
-                else
-                {
-                    await proxy.Http01Precondition(site);
+                    log.LogInformation($"Skipping site since no hostname is binded with given cert: {site.Name}");
                 }
 
-                // 新しく ACME Order を作成する
-                var orderDetails = await proxy.Order(certificate.HostNames);
-
-                // 複数の Authorizations を処理する
-                var challenges = new List<ChallengeResult>();
-
-                foreach (var authorization in orderDetails.Payload.Authorizations)
-                {
-                    ChallengeResult result;
-
-                    // ACME Challenge を実行
-                    if (useDns01Auth)
-                    {
-                        result = await proxy.Dns01Authorization((authorization, context.ParentInstanceId ?? context.InstanceId));
-
-                        // Azure DNS で正しくレコードが引けるか確認
-                        await proxy.CheckDnsChallenge(result);
-                    }
-                    else
-                    {
-                        result = await proxy.Http01Authorization((site, authorization));
-
-                        // HTTP で正しくアクセスできるか確認
-                        await proxy.CheckHttpChallenge(result);
-                    }
-
-                    challenges.Add(result);
-                }
-
-                // ACME Answer を実行
-                await proxy.AnswerChallenges(challenges);
-
-                // Order のステータスが ready になるまで 60 秒待機
-                await proxy.CheckIsReady(orderDetails);
-
-                // Order の最終処理を実行し PFX を作成
-                var (thumbprint, pfxBlob) = await proxy.FinalizeOrder((certificate.HostNames, orderDetails));
+                log.LogInformation($"Processing site: {site.Name}");
 
                 await proxy.UpdateCertificate((site, $"{certificate.HostNames[0]}-{thumbprint}", pfxBlob));
 
-                foreach (var hostNameSslState in site.HostNameSslStates.Where(x => x.Thumbprint == certificate.Thumbprint))
+                foreach (var hostNameSslState in site.HostNameSslStates.Where(x => string.Equals(x.Thumbprint, certificate.Thumbprint, StringComparison.OrdinalIgnoreCase)))
                 {
                     hostNameSslState.Thumbprint = thumbprint;
                     hostNameSslState.ToUpdate = true;
+                    log.LogInformation($"Updated SSL binding: {hostNameSslState.Name}");
                 }
 
                 tasks.Add(proxy.UpdateSiteBinding(site));
@@ -214,6 +221,21 @@ namespace AppService.Acmebot
             var instanceId = await starter.StartNewAsync(nameof(RenewCertificates), null);
 
             log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
+        }
+
+        [FunctionName("RenewCertificates_Http")]
+        public async Task<HttpResponseMessage> HttpStart(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "renew")]
+            HttpRequestMessage req,
+            [OrchestrationClient] DurableOrchestrationClient starter,
+            ILogger log)
+        {
+            // Function input comes from the request content.
+            var instanceId = await starter.StartNewAsync(nameof(RenewCertificates), null);
+
+            log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
+
+            return req.CreateResponse();
         }
     }
 }

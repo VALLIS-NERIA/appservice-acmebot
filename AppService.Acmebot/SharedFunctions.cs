@@ -82,9 +82,14 @@ namespace AppService.Acmebot
         }
 
         [FunctionName(nameof(GetExpringCertificates))]
-        public async Task<IList<Certificate>> GetExpringCertificates([ActivityTrigger] DateTime currentDateTime, int days = 30)
+        public async Task<IList<Certificate>> GetExpringCertificates([ActivityTrigger] DateTime currentDateTime)
         {
             var certificates = await _webSiteManagementClient.Certificates.ListAsync();
+            int days;
+            if (!int.TryParse(Environment.GetEnvironmentVariable("RenewDays"), out days))
+            {
+                days = 30;
+            }
 
             return certificates
                    .Where(x => x.Issuer == "Let's Encrypt Authority X3" || x.Issuer == "Let's Encrypt Authority X4" || x.Issuer == "Fake LE Intermediate X1")

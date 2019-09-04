@@ -18,6 +18,12 @@ namespace AppService.Acmebot
 
             // 期限切れまで 30 日以内の証明書を取得する
             var certificates = await proxy.GetExpiringCertificates(context.CurrentUtcDateTime);
+            var given = context.GetInput<string>();
+
+            if (given != null)
+            {
+                certificates = certificates.Where(cert => cert.HostNames.Any(hn => hn.Contains(given, StringComparison.OrdinalIgnoreCase))).ToArray();
+            }
 
             foreach (var certificate in certificates)
             {
@@ -79,14 +85,7 @@ namespace AppService.Acmebot
             string hostNames = string.Join(',', certificate.HostNames);
             log.LogInformation($"Cert hostname(s): {hostNames}");
             log.LogInformation($"Cert thumbprint: {certificate.Thumbprint}");
-
             log.LogInformation($"Subject name: {certificate.SubjectName}");
-
-            if (sites.All(site => !site.HostNameSslStates.Any(x => string.Equals(x.Thumbprint, certificate.Thumbprint, StringComparison.OrdinalIgnoreCase))))
-            {
-                log.LogWarning($"Not renewing cert {hostNames} since it's not used by any site.");
-                return;
-            }
 
             // 前提条件をチェック
             await proxy.Dns01Precondition(certificate.HostNames);
@@ -119,7 +118,7 @@ namespace AppService.Acmebot
             // Order の最終処理を実行し PFX を作成
             var (thumbprint, pfxBlob) = await proxy.FinalizeOrder((certificate.HostNames, orderDetails));
 
-            var tasks = new List<Task>();
+            log.LogInformation($"New cert thumbprint: {thumbprint}");
 
             bool certUploaded = false;
 
@@ -146,10 +145,9 @@ namespace AppService.Acmebot
                     log.LogInformation($"Update SSL binding: {hostNameSslState.Name}");
                 }
 
-                tasks.Add(proxy.UpdateSiteBinding(site));
+                await proxy.UpdateSiteBinding(site);
+                log.LogInformation($"Finished site: {site.Name}");
             }
-
-            Task.WaitAll(tasks.ToArray());
         }
 
         [FunctionName(nameof(RenewSiteCertificates))]
@@ -239,13 +237,15 @@ namespace AppService.Acmebot
 
         [FunctionName("RenewCertificates_Http")]
         public async Task<HttpResponseMessage> HttpStart(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "renew")]
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "renew/{site}")]
             HttpRequestMessage req,
             [OrchestrationClient] DurableOrchestrationClient starter,
+            string site,
             ILogger log)
         {
             // Function input comes from the request content.
-            var instanceId = await starter.StartNewAsync(nameof(RenewCertificates), null);
+            
+            var instanceId = await starter.StartNewAsync(nameof(RenewCertificates), site);
 
             log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
 

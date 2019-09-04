@@ -16,7 +16,7 @@ namespace AppService.Acmebot.Internal
 
     internal class AcmeProtocolClientFactory : IAcmeProtocolClientFactory
     {
-        private static readonly Uri _acmeEndpoint = new Uri("https://acme-v02.api.letsencrypt.org/");
+        private static readonly Uri _acmeEndpoint = new Uri("https://acme-staging-v02.api.letsencrypt.org/directory");
 
         public async Task<AcmeProtocolClient> CreateClientAsync()
         {

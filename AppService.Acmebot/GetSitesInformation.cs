@@ -100,6 +100,35 @@ namespace AppService.Acmebot
 
             return await starter.WaitForCompletionOrCreateCheckStatusResponseAsync(req, instanceId, TimeSpan.FromSeconds(30));
         }
+
+        [FunctionName(nameof(GetZonesInformation))]
+        public async Task<IList<string>> GetZonesInformation([OrchestrationTrigger] DurableOrchestrationContext context)
+        {
+            var proxy = context.CreateActivityProxy<ISharedFunctions>();
+            var zones = await proxy.GetZones();
+
+            return zones.Select(z => z.Name).ToArray();
+        }
+
+        [FunctionName(nameof(GetZonesInformation_HttpStart))]
+        public async Task<HttpResponseMessage> GetZonesInformation_HttpStart(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "get-zones-information")]
+            HttpRequestMessage req,
+            [OrchestrationClient] DurableOrchestrationClient starter,
+            ILogger log)
+        {
+            if (!req.Headers.Contains("X-MS-CLIENT-PRINCIPAL-ID"))
+            {
+                return req.CreateErrorResponse(HttpStatusCode.Unauthorized, $"Need to activate EasyAuth.");
+            }
+
+            // Function input comes from the request content.
+            var instanceId = await starter.StartNewAsync(nameof(GetZonesInformation), null);
+
+            log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
+
+            return await starter.WaitForCompletionOrCreateCheckStatusResponseAsync(req, instanceId, TimeSpan.FromSeconds(30));
+        }
     }
 
     public class ResourceGroupInformation

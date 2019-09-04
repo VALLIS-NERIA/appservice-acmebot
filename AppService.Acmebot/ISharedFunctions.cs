@@ -25,6 +25,8 @@ namespace AppService.Acmebot
 
         Task<IList<Certificate>> GetAllCertificates(object input = null);
 
+        Task<DeploymentLocations> GetAllLocations(object input = null);
+
         Task<OrderDetails> Order(IList<string> hostNames);
 
         Task Http01Precondition(Site site);

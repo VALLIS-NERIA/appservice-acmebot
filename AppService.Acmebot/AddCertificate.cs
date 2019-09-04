@@ -150,8 +150,9 @@ namespace AppService.Acmebot
 
             var proxy = context.CreateActivityProxy<ISharedFunctions>();
 
+            log.LogInformation($"Creating wildcard for domain(s): {string.Join(", ", request.Domains)}; RG: {request.ResourceGroupName}; Location: {request.Location}");
 
-            foreach (string hostName in request.HostNames)
+            foreach (string hostName in request.Domains)
             {
                 var zone = await proxy.GetZone(hostName);
                 var requestingDomains = new[] { "*." + hostName, hostName };
@@ -181,7 +182,7 @@ namespace AppService.Acmebot
                 // Order の最終処理を実行し PFX を作成
                 var (thumbprint, pfxBlob) = await proxy.FinalizeOrder((requestingDomains, orderDetails));
 
-                await proxy.UploadCertificate((request.ResourceGroup, request.Location, $"{requestingDomains[0]}-{thumbprint}", pfxBlob));
+                await proxy.UploadCertificate((request.ResourceGroupName, request.Location, $"{requestingDomains[0]}-{thumbprint}", pfxBlob));
             }
         }
 
@@ -199,13 +200,13 @@ namespace AppService.Acmebot
 
             var request = await req.Content.ReadAsAsync<DnsZoneRequest>();
 
-            if (request.HostNames.Length == 0)
+            if (request?.Domains?.Length == 0)
             {
                 return req.CreateErrorResponse(HttpStatusCode.BadRequest, $"{nameof(request)} is empty.");
             }
 
             // Function input comes from the request content.
-            var instanceId = await starter.StartNewAsync("AddCertificate", request);
+            var instanceId = await starter.StartNewAsync(nameof(CreateWildcardCertificate), request);
 
             log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
 
@@ -224,8 +225,8 @@ namespace AppService.Acmebot
 
     public class DnsZoneRequest
     {
-        public string[] HostNames { get; set; }
-        public string ResourceGroup { get; set; }
+        public string[] Domains { get; set; }
+        public string ResourceGroupName { get; set; }
         public string Location { get; set; }
     }
 }

@@ -111,6 +111,12 @@ namespace AppService.Acmebot
             return certificates.ToArray();
         }
 
+        [FunctionName(nameof(GetAllLocations))]
+        public async Task<DeploymentLocations> GetAllLocations([ActivityTrigger] object input)
+        {
+            return await this._webSiteManagementClient.GetSubscriptionDeploymentLocationsAsync();
+        }
+
         [FunctionName(nameof(Order))]
         public async Task<OrderDetails> Order([ActivityTrigger] IList<string> hostNames)
         {

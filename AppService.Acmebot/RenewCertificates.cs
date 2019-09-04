@@ -40,7 +40,7 @@ namespace AppService.Acmebot
             // update wildcard certs
             foreach (var certificate in certificates.Where(cert => cert.HostNames.Any(hn => hn.StartsWith("*"))))
             {
-                tasks.Add(context.CallSubOrchestratorAsync(nameof(RenewWildcardCertificateForAllSites), (certificate, sites)));
+                await context.CallSubOrchestratorAsync(nameof(RenewWildcardCertificateForAllSites), (certificate, sites));
             }
 
             // wildcard certs are excluded
@@ -76,10 +76,17 @@ namespace AppService.Acmebot
 
             var proxy = context.CreateActivityProxy<ISharedFunctions>();
 
-            log.LogInformation($"Cert hostname(s): {string.Join(',', certificate.HostNames)}");
+            string hostNames = string.Join(',', certificate.HostNames);
+            log.LogInformation($"Cert hostname(s): {hostNames}");
             log.LogInformation($"Cert thumbprint: {certificate.Thumbprint}");
 
             log.LogInformation($"Subject name: {certificate.SubjectName}");
+
+            if (sites.All(site => !site.HostNameSslStates.Any(x => string.Equals(x.Thumbprint, certificate.Thumbprint, StringComparison.OrdinalIgnoreCase))))
+            {
+                log.LogWarning($"Not renewing cert {hostNames} since it's not used by any site.");
+                return;
+            }
 
             // 前提条件をチェック
             await proxy.Dns01Precondition(certificate.HostNames);
@@ -114,23 +121,29 @@ namespace AppService.Acmebot
 
             var tasks = new List<Task>();
 
+            bool certUploaded = false;
+
             foreach (var site in sites)
             {
                 if (!site.HostNameSslStates.Any(x => string.Equals(x.Thumbprint, certificate.Thumbprint, StringComparison.OrdinalIgnoreCase)))
                 {
-                    log.LogInformation($"Skipping site since no hostname is binded with given cert: {site.Name}");
+                    log.LogInformation($"Skipping site {site.Name} since no hostname is binded with the cert {hostNames}");
                     continue;
                 }
 
                 log.LogInformation($"Processing site: {site.Name}");
 
-                await proxy.UpdateCertificate((site, $"{certificate.HostNames[0]}-{thumbprint}", pfxBlob));
+                if (!certUploaded)
+                {
+                    await proxy.UploadCertificate((site.ResourceGroup, site.Location, $"{certificate.HostNames[0]}-{thumbprint}", pfxBlob));
+                    certUploaded = true;
+                }
 
                 foreach (var hostNameSslState in site.HostNameSslStates.Where(x => string.Equals(x.Thumbprint, certificate.Thumbprint, StringComparison.OrdinalIgnoreCase)))
                 {
                     hostNameSslState.Thumbprint = thumbprint;
                     hostNameSslState.ToUpdate = true;
-                    log.LogInformation($"Updated SSL binding: {hostNameSslState.Name}");
+                    log.LogInformation($"Update SSL binding: {hostNameSslState.Name}");
                 }
 
                 tasks.Add(proxy.UpdateSiteBinding(site));

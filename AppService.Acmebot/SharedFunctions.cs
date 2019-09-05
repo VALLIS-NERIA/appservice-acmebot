@@ -47,7 +47,7 @@ namespace AppService.Acmebot
         {
             var (resourceGroupName, siteName, slotName) = input;
 
-            if (!string.IsNullOrEmpty(slotName))
+            if (!"production".Equals(slotName) && !string.IsNullOrEmpty(slotName))
             {
                 return await _webSiteManagementClient.WebApps.GetSlotAsync(resourceGroupName, siteName, slotName);
             }

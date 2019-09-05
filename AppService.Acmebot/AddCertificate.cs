@@ -212,6 +212,78 @@ namespace AppService.Acmebot
 
             return await starter.WaitForCompletionOrCreateCheckStatusResponseAsync(req, instanceId, TimeSpan.FromMinutes(5));
         }
+
+        [FunctionName(nameof(BindCertificate))]
+        public async Task BindCertificate([OrchestrationTrigger] DurableOrchestrationContext context, ILogger log)
+        {
+            var request = context.GetInput<BindCertRequest>();
+
+            var proxy = context.CreateActivityProxy<ISharedFunctions>();
+
+            var certs = await proxy.GetAllCertificates();
+            var cert = certs.First(c => string.Equals(c.Thumbprint, request.CertThumbprint, StringComparison.OrdinalIgnoreCase));
+
+            if (cert == null)
+            {
+                string error = $"Given cert with thumbprint {request.CertThumbprint} not Found.";
+                log.LogError(error);
+                throw new ArgumentException(error);
+            }
+
+            var groupedDomains = request.SiteDomains.GroupBy(sd => (sd.ResourceGroupName, sd.SiteName, sd.SlotName));
+            foreach (var group in groupedDomains)
+            {
+                var site = await proxy.GetSite(group.Key);
+
+                if (site == null)
+                {
+                    string error = $"site {group.Key.ResourceGroupName}/{group.Key.SiteName}/{group.Key.SlotName} doesn't exist";
+                    log.LogError(error);
+                    throw new ArgumentException(error);
+                }
+
+                var domains = group.Select(sd => sd.Domain).ToArray();
+                var hostNameSslStates = site.HostNameSslStates
+                                            .Where(x => domains.Contains(x.Name))
+                                            .ToArray();
+
+                foreach (var hostNameSslState in hostNameSslStates)
+                {
+                    hostNameSslState.Thumbprint = cert.Thumbprint;
+                    hostNameSslState.SslState = SslState.SniEnabled;
+                    hostNameSslState.ToUpdate = true;
+                }
+
+                await proxy.UpdateSiteBinding(site);
+            }
+        }
+
+        [FunctionName(nameof(BindCertificate_HttpStart))]
+        public async Task<HttpResponseMessage> BindCertificate_HttpStart(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "bind-certificate")]
+            HttpRequestMessage req,
+            [OrchestrationClient] DurableOrchestrationClient starter,
+            ILogger log)
+        {
+            if (!req.Headers.Contains("X-MS-CLIENT-PRINCIPAL-ID"))
+            {
+                return req.CreateErrorResponse(HttpStatusCode.Unauthorized, $"Need to activate EasyAuth.");
+            }
+
+            var request = await req.Content.ReadAsAsync<BindCertRequest>();
+
+            if (string.IsNullOrEmpty(request?.CertThumbprint))
+            {
+                return req.CreateErrorResponse(HttpStatusCode.BadRequest, $"{nameof(request.CertThumbprint)} is empty.");
+            }
+
+            // Function input comes from the request content.
+            var instanceId = await starter.StartNewAsync(nameof(BindCertificate), request);
+
+            log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
+
+            return await starter.WaitForCompletionOrCreateCheckStatusResponseAsync(req, instanceId, TimeSpan.FromMinutes(5));
+        }
     }
 
     public class AddCertificateRequest
@@ -228,5 +300,19 @@ namespace AppService.Acmebot
         public string[] Domains { get; set; }
         public string ResourceGroupName { get; set; }
         public string Location { get; set; }
+    }
+
+    public class BindCertRequest
+    {
+        public class SiteDomain
+        {
+            public string ResourceGroupName { get; set; }
+            public string SiteName { get; set; }
+            public string SlotName { get; set; }
+            public string Domain { get; set; }
+        }
+
+        public string CertThumbprint { get; set; }
+        public SiteDomain[] SiteDomains { get; set; }
     }
 }

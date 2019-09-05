@@ -12,6 +12,12 @@
             "route": "create-wildcard"
         },
         "backendUri": "https://kvantumasg.blob.core.windows.net/static/create-wildcard.html"
+    },
+    "BindCerts": {
+        "matchCondition": {
+            "route": "bind-certificate"
+        },
+        "backendUri": "https://kvantumasg.blob.core.windows.net/static/bind-cert.html"
     } 
   }
 }

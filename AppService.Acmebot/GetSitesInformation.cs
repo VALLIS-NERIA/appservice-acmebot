@@ -15,6 +15,8 @@ using Newtonsoft.Json;
 
 namespace AppService.Acmebot
 {
+    using System.Runtime.ConstrainedExecution;
+
     public class GetSitesInformation
     {
         [FunctionName("GetSitesInformation")]
@@ -129,6 +131,44 @@ namespace AppService.Acmebot
 
             return await starter.WaitForCompletionOrCreateCheckStatusResponseAsync(req, instanceId, TimeSpan.FromSeconds(30));
         }
+
+        [FunctionName(nameof(GetCertsInformation))]
+        public async Task<IList<CertInformation>> GetCertsInformation([OrchestrationTrigger] DurableOrchestrationContext context)
+        {
+            var proxy = context.CreateActivityProxy<ISharedFunctions>();
+            var certs = await proxy.GetAllCertificates();
+
+            return certs.OrderByDescending(c => c.IssueDate)
+                        .Select(
+                            c => new CertInformation
+                            {
+                                HostNames = c.HostNames,
+                                Thumbprint = c.Thumbprint,
+                                Issuer = c.Issuer,
+                                IssueDate = c.IssueDate.ToString()
+                            })
+                        .ToArray();
+        }
+
+        [FunctionName(nameof(GetCertsInformation_HttpStart))]
+        public async Task<HttpResponseMessage> GetCertsInformation_HttpStart(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "get-certs-information")]
+            HttpRequestMessage req,
+            [OrchestrationClient] DurableOrchestrationClient starter,
+            ILogger log)
+        {
+            if (!req.Headers.Contains("X-MS-CLIENT-PRINCIPAL-ID"))
+            {
+                return req.CreateErrorResponse(HttpStatusCode.Unauthorized, $"Need to activate EasyAuth.");
+            }
+
+            // Function input comes from the request content.
+            var instanceId = await starter.StartNewAsync(nameof(GetCertsInformation), null);
+
+            log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
+
+            return await starter.WaitForCompletionOrCreateCheckStatusResponseAsync(req, instanceId, TimeSpan.FromSeconds(30));
+        }
     }
 
     public class ResourceGroupInformation
@@ -165,5 +205,20 @@ namespace AppService.Acmebot
 
         [JsonProperty("issuer")]
         public string Issuer { get; set; }
+    }
+
+    public class CertInformation 
+    {
+        [JsonProperty("hostNames")]
+        public IList<string> HostNames { get; set; }
+
+        [JsonProperty("thumbprint")]
+        public string Thumbprint { get; set; }
+
+        [JsonProperty("issuer")]
+        public string Issuer { get; set; }
+
+        [JsonProperty("issueDate")]
+        public string IssueDate { get; set; }
     }
 }

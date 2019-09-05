@@ -1,0 +1,163 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>App Service Acmebot</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.2/css/bulma.min.css">
+  <script defer src="https://use.fontawesome.com/releases/v5.3.1/js/all.js"></script>
+</head>
+<body>
+  <section class="section">
+    <div class="container">
+      <h1 class="title">
+        Add Certificate
+      </h1>
+      <div id="app">
+        <div class="field">
+          <label class="label">Certificate</label>
+          <div class="control">
+            <div class="select" v-bind:class="{ 'is-loading': loading }" >
+              <select v-model="selectedCert">
+                <option disabled value="">Please select one</option>
+                <option v-for="cert in certs" :value="cert">{{ cert.hostNames.join() + " (" + cert.issuer + " @ " + cert.issueDate + " : " + cert.thumbprint + ")" }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <label class="label">Domains to bind</label>
+          <div class="control">
+            <div class="select is-multiple">
+              <select multiple v-model="selectedSiteDomains">
+                <option v-for="sd in okSiteDomains" :value="sd">{{ sd.Domain + " | " + (sd.SlotName==='production' ? "" : ( sd.SlotName + " | ")) + sd.SiteName + " | " + sd.ResourceGroupName }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <div class="control">
+            <button class="button is-primary" v-on:click="submit" v-bind:class="{ 'is-loading': sending }">Submit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/2.5.17/vue.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.18.0/axios.min.js"></script>
+  <script>
+    var app = new Vue({
+      el: '#app',
+      data: {
+        siteInformation: [],
+        siteDomains: [],
+        certs: [],
+        selectedCert: undefined,
+        selectedSiteDomains: [],
+        loading: -2,
+        sending: false
+      },
+      computed: {
+        okSiteDomains: function(){
+          if (!this.selectedCert) { return this.siteDomains; }
+          var ret = [];
+
+          for (const sd of this.siteDomains) {
+            for (const hn of this.selectedCert.hostNames) {
+              if (sd.Domain.toLowerCase() === hn.toLowerCase() ||
+                (hn.startsWith("*.") && sd.Domain.toLowerCase().endsWith(hn.substr(2).toLowerCase()))){
+                ret.push(sd);
+                break;
+              }
+            }
+          }
+
+          return ret;
+        }
+      },
+      methods: {
+        load: function () {
+          var self = this;
+          self.loading = -2;
+
+          var getSiteDomains = function(siteInformation) {
+            var sds = [];
+            for (const rg of siteInformation) {
+              for (const site of rg.sites) {
+                for (const slot of site.slots) {
+                  for (const domain of slot.domains) {
+                    sds.push({
+                      ResourceGroupName: rg.name,
+                      SiteName: site.name,
+                      SlotName: slot.name,
+                      Domain: domain.name
+                    });
+                  }
+                }
+              }
+            }
+
+            return sds;
+          }
+          axios.get("/api/get-sites-information")
+            .then(function (response) {
+              self.$set(self, "siteInformation", response.data);
+              self.$set(self, "siteDomains", getSiteDomains(response.data));
+            })
+            .catch(function (error) {
+              alert(error);
+            })
+            .then(function () {
+              self.loading += 1;
+            });
+          axios.get("/api/get-certs-information")
+            .then(function (response) {
+              self.$set(self, "certs", response.data);
+            })
+            .catch(function (error) {
+              alert(error);
+            })
+            .then(function () {
+              self.loading += 1;
+            });
+        },
+        reload: function () {
+          this.siteInformation = [];
+          this.certs = [];
+          this.resourceGroupName = '';
+          this.selectedcerts = [];
+          //this.location = '';
+
+          this.load();
+        },
+        submit: function () {
+          var postData = {
+            CertThumbprint: this.selectedCert.thumbprint,
+            SiteDomains: this.selectedSiteDomains
+          };
+
+          var self = this;
+
+          self.sending = true;
+
+          axios.post("/api/bind-certificate", postData)
+            .then(function (response) {
+              alert("The certificate was successfully binded");
+
+              self.reload();
+            })
+            .catch(function (error) {
+              alert(error);
+            })
+            .then(function () {
+              self.sending = false;
+            });
+        }
+      },
+      beforeMount: function () {
+        this.load();
+      }
+    });
+  </script>
+</body>
+</html>

@@ -16,7 +16,9 @@ namespace AppService.Acmebot.Internal
 
     internal class AcmeProtocolClientFactory : IAcmeProtocolClientFactory
     {
-        private static readonly Uri _acmeEndpoint = new Uri("https://acme-staging-v02.api.letsencrypt.org/directory");
+        // You will need to delete .acme/account.json and .acme/account_key.json after changing the endpoint.
+        // They can be found at the storage account create with acmebot, in File Shares.
+        private static readonly Uri _acmeEndpoint = new Uri("https://acme-v02.api.letsencrypt.org/");
 
         public async Task<AcmeProtocolClient> CreateClientAsync()
         {

@@ -65,7 +65,7 @@
           for (const sd of this.siteDomains) {
             for (const hn of this.selectedCert.hostNames) {
               if (sd.Domain.toLowerCase() === hn.toLowerCase() ||
-                (hn.startsWith("*.") && sd.Domain.toLowerCase().endsWith(hn.substr(2).toLowerCase()))){
+                (hn.startsWith("*.") && sd.Domain.toLowerCase().endsWith(hn.substr(1).toLowerCase()))){
                 ret.push(sd);
                 break;
               }

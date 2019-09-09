@@ -237,7 +237,7 @@ namespace AppService.Acmebot
 
         [FunctionName("RenewCertificates_Http")]
         public async Task<HttpResponseMessage> HttpStart(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "renew/{site}")]
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "renew/{*site}")]
             HttpRequestMessage req,
             [OrchestrationClient] DurableOrchestrationClient starter,
             string site,

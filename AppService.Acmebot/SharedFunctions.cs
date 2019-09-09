@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -393,6 +394,8 @@ namespace AppService.Acmebot
         {
             var (site, certificateName, pfxBlob) = input;
 
+            SavePfx(pfxBlob, certificateName);
+            
             return _webSiteManagementClient.Certificates.CreateOrUpdateAsync(site.ResourceGroup, certificateName, new Certificate
             {
                 Location = site.Location,
@@ -406,6 +409,8 @@ namespace AppService.Acmebot
         public Task UploadCertificate([ActivityTrigger] (string, string, string, byte[]) input)
         {
             var (resourceGroup, location, certificateName, pfxBlob) = input;
+
+            SavePfx(pfxBlob, certificateName);
 
             return _webSiteManagementClient.Certificates.CreateOrUpdateAsync(
                 resourceGroup,
@@ -437,6 +442,14 @@ namespace AppService.Acmebot
             var values = resourceId.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
             return (values[1], values[3], values[5]);
+        }
+
+        private static void SavePfx(byte[] pfxBlob, string filename)
+        {
+            using (var fs = new FileStream(filename, FileMode.Create))
+            {
+                fs.Write(pfxBlob);
+            }
         }
 
         private static readonly string DefaultWebConfigPath = ".well-known/web.config";

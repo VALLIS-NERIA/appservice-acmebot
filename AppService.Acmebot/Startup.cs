@@ -36,6 +36,8 @@ namespace AppService.Acmebot
             });
 
             builder.Services.AddSingleton<IAcmeProtocolClientFactory, AcmeProtocolClientFactory>();
+            builder.Services.AddSingleton<AcmeProcess>();
+            builder.Services.AddSingleton<AzureHelper>();
         }
     }
 }

@@ -19,9 +19,8 @@ namespace AppService.Acmebot
         {
             var request = context.GetInput<AddCertificateRequest>();
 
-            var proxy = context.CreateActivityProxy<ISharedFunctions>();
 
-            var site = await proxy.GetSite((request.ResourceGroupName, request.SiteName, request.SlotName));
+            var site = await Utils.Azure.GetSite(request.ResourceGroupName, request.SiteName, request.SlotName);
 
             if (site == null)
             {
@@ -45,6 +44,24 @@ namespace AppService.Acmebot
             // ワイルドカード、コンテナ、Linux の場合は DNS-01 を利用する
             var useDns01Auth = request.Domains.Any(x => x.StartsWith("*")) || site.Kind.Contains("container") || site.Kind.Contains("linux");
 
+            var (thumbprint, pfxBlob) = await AddCertificate.AcmeChallenge(context, useDns01Auth, request, site);
+
+            await Utils.Azure.UpdateCertificate(site, $"{request.Domains[0]}-{thumbprint}", pfxBlob);
+
+            foreach (var hostNameSslState in hostNameSslStates)
+            {
+                hostNameSslState.Thumbprint = thumbprint;
+                hostNameSslState.SslState = request.UseIpBasedSsl ?? false ? SslState.IpBasedEnabled : SslState.SniEnabled;
+                hostNameSslState.ToUpdate = true;
+            }
+
+            await Utils.Azure.UpdateSiteBinding(site);
+        }
+
+        public static async Task<(string thumbprint, byte[] pfxBlob)> AcmeChallenge(DurableOrchestrationContext context, bool useDns01Auth, AddCertificateRequest request, Site site)
+        {
+            var proxy = Utils.Acme;
+
             // 前提条件をチェック
             if (useDns01Auth)
             {
@@ -61,6 +78,10 @@ namespace AppService.Acmebot
             // 複数の Authorizations を処理する
             var challenges = new List<ChallengeResult>();
 
+            if (useDns01Auth)
+            {
+            }
+
             foreach (var authorization in orderDetails.Payload.Authorizations)
             {
                 ChallengeResult result;
@@ -69,7 +90,7 @@ namespace AppService.Acmebot
                 if (useDns01Auth)
                 {
                     // DNS-01 を使う
-                    result = await proxy.Dns01Authorization((authorization, context.ParentInstanceId ?? context.InstanceId));
+                    result = await proxy.Dns01Authorization(authorization, context.ParentInstanceId ?? context.InstanceId);
 
                     // Azure DNS で正しくレコードが引けるか確認
                     await proxy.CheckDnsChallenge(result);
@@ -77,7 +98,7 @@ namespace AppService.Acmebot
                 else
                 {
                     // HTTP-01 を使う
-                    result = await proxy.Http01Authorization((site, authorization));
+                    result = await proxy.Http01Authorization(site, authorization);
 
                     // HTTP で正しくアクセスできるか確認
                     await proxy.CheckHttpChallenge(result);
@@ -93,18 +114,7 @@ namespace AppService.Acmebot
             await proxy.CheckIsReady(orderDetails);
 
             // Order の最終処理を実行し PFX を作成
-            var (thumbprint, pfxBlob) = await proxy.FinalizeOrder((request.Domains, orderDetails));
-
-            await proxy.UpdateCertificate((site, $"{request.Domains[0]}-{thumbprint}", pfxBlob));
-
-            foreach (var hostNameSslState in hostNameSslStates)
-            {
-                hostNameSslState.Thumbprint = thumbprint;
-                hostNameSslState.SslState = request.UseIpBasedSsl ?? false ? SslState.IpBasedEnabled : SslState.SniEnabled;
-                hostNameSslState.ToUpdate = true;
-            }
-
-            await proxy.UpdateSiteBinding(site);
+            return await proxy.FinalizeOrder(request.Domains, orderDetails);
         }
 
         [FunctionName("AddCertificate_HttpStart")]

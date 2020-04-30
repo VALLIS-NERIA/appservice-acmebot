@@ -1,30 +1,40 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
-using System.Net.Http;
 using System.Threading.Tasks;
 
+using AppService.Acmebot.Contracts;
 using AppService.Acmebot.Internal;
+using AppService.Acmebot.Models;
 
+using Azure.WebJobs.Extensions.HttpApi;
+
+using DurableTask.TypedProxy;
+
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.WebJobs;
+using Microsoft.Azure.WebJobs.Extensions.DurableTask;
 using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.Extensions.Logging;
 
-using Newtonsoft.Json;
-
 namespace AppService.Acmebot
 {
-    public class GetSitesInformation
+    public class GetSitesFunctions : HttpFunctionBase
     {
-        [FunctionName("GetSitesInformation")]
-        public async Task<IList<ResourceGroupInformation>> RunOrchestrator([OrchestrationTrigger] DurableOrchestrationContext context)
+        public GetSitesFunctions(IHttpContextAccessor httpContextAccessor)
+            : base(httpContextAccessor)
         {
-            var proxy = context.CreateActivityProxy<ISharedFunctions>();
+        }
+
+        [FunctionName(nameof(GetSitesInformation))]
+        public async Task<IList<ResourceGroupInformation>> GetSitesInformation([OrchestrationTrigger] IDurableOrchestrationContext context)
+        {
+            var activity = context.CreateActivityProxy<ISharedFunctions>();
 
             // App Service を取得
-            var sites = await proxy.GetSites();
-            var certificates = await proxy.GetAllCertificates();
+            var sites = await activity.GetSites();
+            var certificates = await activity.GetAllCertificates();
 
             var result = new List<ResourceGroupInformation>();
 
@@ -36,7 +46,7 @@ namespace AppService.Acmebot
                     Sites = new List<SiteInformation>()
                 };
 
-                foreach (var site in item.ToLookup(x => x.SplitName().siteName))
+                foreach (var site in item.ToLookup(x => x.SplitName().appName))
                 {
                     var siteInformation = new SiteInformation
                     {
@@ -82,59 +92,23 @@ namespace AppService.Acmebot
             return result;
         }
 
-        [FunctionName("GetSitesInformation_HttpStart")]
-        public async Task<HttpResponseMessage> HttpStart(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "get-sites-information")] HttpRequestMessage req,
-            [OrchestrationClient] DurableOrchestrationClient starter,
+        [FunctionName(nameof(GetSitesInformation_HttpStart))]
+        public async Task<IActionResult> GetSitesInformation_HttpStart(
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "get-sites-information")] HttpRequest req,
+            [DurableClient] IDurableClient starter,
             ILogger log)
         {
-            if (!req.Headers.Contains("X-MS-CLIENT-PRINCIPAL-ID"))
+            if (!User.Identity.IsAuthenticated)
             {
-                return req.CreateErrorResponse(HttpStatusCode.Unauthorized, $"Need to activate EasyAuth.");
+                return Unauthorized();
             }
 
             // Function input comes from the request content.
-            var instanceId = await starter.StartNewAsync("GetSitesInformation", null);
+            var instanceId = await starter.StartNewAsync(nameof(GetSitesInformation), null);
 
             log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
 
             return await starter.WaitForCompletionOrCreateCheckStatusResponseAsync(req, instanceId, TimeSpan.FromSeconds(30));
         }
-    }
-
-    public class ResourceGroupInformation
-    {
-        [JsonProperty("name")]
-        public string Name { get; set; }
-
-        [JsonProperty("sites")]
-        public IList<SiteInformation> Sites { get; set; }
-    }
-
-    public class SiteInformation
-    {
-        [JsonProperty("name")]
-        public string Name { get; set; }
-
-        [JsonProperty("slots")]
-        public IList<SlotInformation> Slots { get; set; }
-    }
-
-    public class SlotInformation
-    {
-        [JsonProperty("name")]
-        public string Name { get; set; }
-
-        [JsonProperty("domains")]
-        public IList<DomainInformation> Domains { get; set; }
-    }
-
-    public class DomainInformation
-    {
-        [JsonProperty("name")]
-        public string Name { get; set; }
-
-        [JsonProperty("issuer")]
-        public string Issuer { get; set; }
     }
 }

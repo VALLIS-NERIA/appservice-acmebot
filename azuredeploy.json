@@ -16,7 +16,7 @@
     }
   },
   "variables": {
-    "functionAppName": "[concat(parameters('appNamePrefix'), uniquestring(resourceGroup().id, deployment().name))]",
+    "functionAppName": "[concat(parameters('appNamePrefix'), '-', substring(uniquestring(resourceGroup().id, deployment().name), 0, 4))]",
     "storageAccountName": "[concat(uniquestring(resourceGroup().id, deployment().name), 'azfunctions')]",
     "storageAccountId": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
     "mailAddress": "[parameters('mailAddress')]"
@@ -94,11 +94,11 @@
             },
             {
               "name": "WEBSITE_RUN_FROM_PACKAGE",
-              "value": "https://shibayan.blob.core.windows.net/azure-appservice-letsencrypt/latest.zip"
+              "value": "https://shibayan.blob.core.windows.net/azure-appservice-letsencrypt/v3/latest.zip"
             },
             {
               "name": "FUNCTIONS_EXTENSION_VERSION",
-              "value": "~2"
+              "value": "~3"
             },
             {
               "name": "FUNCTIONS_WORKER_RUNTIME",

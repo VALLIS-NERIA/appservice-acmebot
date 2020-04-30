@@ -4,10 +4,13 @@ using System.Threading.Tasks;
 
 using ACMESharp.Protocol;
 
-using Microsoft.Azure.Management.WebSites.Models;
-using Microsoft.Azure.WebJobs;
+using AppService.Acmebot.Models;
 
-namespace AppService.Acmebot
+using DurableTask.TypedProxy;
+
+using Microsoft.Azure.Management.WebSites.Models;
+
+namespace AppService.Acmebot.Contracts
 {
     public interface ISharedFunctions
     {
@@ -23,28 +26,30 @@ namespace AppService.Acmebot
 
         Task Http01Precondition(Site site);
 
-        Task<ChallengeResult> Http01Authorization((Site, string) input);
+        Task<IList<AcmeChallengeResult>> Http01Authorization((Site, string[]) input);
 
         [RetryOptions("00:00:10", 6, HandlerType = typeof(RetryStrategy), HandlerMethodName = nameof(RetryStrategy.RetriableException))]
-        Task CheckHttpChallenge(ChallengeResult challenge);
+        Task CheckHttpChallenge(IList<AcmeChallengeResult> challengeResults);
 
         Task Dns01Precondition(IList<string> hostNames);
 
-        Task<ChallengeResult> Dns01Authorization((string, string) context);
+        Task<IList<AcmeChallengeResult>> Dns01Authorization(string[] authorizationUrls);
 
         [RetryOptions("00:00:10", 6, HandlerType = typeof(RetryStrategy), HandlerMethodName = nameof(RetryStrategy.RetriableException))]
-        Task CheckDnsChallenge(ChallengeResult challenge);
+        Task CheckDnsChallenge(IList<AcmeChallengeResult> challengeResults);
 
         [RetryOptions("00:00:05", 12, HandlerType = typeof(RetryStrategy), HandlerMethodName = nameof(RetryStrategy.RetriableException))]
         Task CheckIsReady(OrderDetails orderDetails);
 
-        Task AnswerChallenges(IList<ChallengeResult> challenges);
+        Task AnswerChallenges(IList<AcmeChallengeResult> challengeResults);
 
         Task<(string, byte[])> FinalizeOrder((IList<string>, OrderDetails) input);
 
         Task UpdateCertificate((Site, string, byte[]) input);
 
         Task UpdateSiteBinding(Site site);
+
+        Task CleanupVirtualApplication(Site site);
 
         Task DeleteCertificate(Certificate certificate);
     }
